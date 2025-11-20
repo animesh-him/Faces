@@ -1,161 +1,98 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="utf-8" />
-  <title>Face Extractor — GitHub Pages (root models)</title>
-
-  <!-- Use stable CDN build of face-api (no local file needed) -->
-  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
-
-  <style>
-    body { font-family: Arial, sans-serif; padding: 18px; text-align:center; }
-    #status { display:block; margin:12px auto; padding:10px; width:90%; max-width:720px;
-              border-radius:6px; background:#f7f7f7; border-left:6px solid #2b7cff; color:#111; }
-    #previewImg { max-width:90%; display:block; margin:12px auto; }
-    #faces { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:14px; }
-    .face-box { width:150px; height:150px; overflow:hidden; border:1px solid #ccc; border-radius:6px; }
-    .face-box img{ width:100%; height:100%; object-fit:cover; display:block; }
-  </style>
+    <title>Face Extractor</title>
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
+    <style>
+        body { font-family: Arial; text-align: center; margin-top: 20px; }
+        #status { margin: 20px; font-size: 18px; color: blue; font-weight: bold; }
+        #faces { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 30px; }
+        .face-box { border: 2px solid black; padding: 5px; }
+    </style>
 </head>
 <body>
 
-  <h2>Upload Image → Extract All Faces</h2>
+<h2>Upload Image → Extract All Faces</h2>
+<input type="file" id="imageUpload" accept="image/*" />
 
-  <input id="fileInput" type="file" accept="image/*" />
-  <div id="status">Initializing…</div>
+<div id="status">Loading models… please wait</div>
 
-  <!-- preview (required visible img for some mobile browsers) -->
-  <img id="previewImg" alt="preview" style="display:none" />
+<img id="inputImage" style="max-width: 90%; margin-top: 20px; display: none;" />
 
-  <div id="faces"></div>
+<div id="faces"></div>
 
 <script>
-(async () => {
-  const statusEl = document.getElementById('status');
-  const input = document.getElementById('fileInput');
-  const previewImg = document.getElementById('previewImg');
-  const facesEl = document.getElementById('faces');
-
-  function setStatus(text) {
-    statusEl.innerText = text;
-    console.log(text);
-  }
-
-  // Load models from current directory (root next to index.html)
-  async function loadModels() {
+async function loadModels() {
     try {
-      setStatus('Loading models from current folder ("./") — this may take a few seconds...');
-      // load only the models you need — SSD + landmarks are required for detection + cropping
-      await faceapi.nets.ssdMobilenetv1.loadFromUri('./');
-      await faceapi.nets.faceLandmark68Net.loadFromUri('./');
-      // optional but harmless if present
-      try { await faceapi.nets.faceExpressionNet.loadFromUri('./'); } catch(e){}
-      try { await faceapi.nets.ageGenderNet.loadFromUri('./'); } catch(e){}
-      try { await faceapi.nets.faceRecognitionNet.loadFromUri('./'); } catch(e){}
-      setStatus('Models loaded. Select a photo to process.');
-    } catch (err) {
-      console.error('Model load error:', err);
-      setStatus('❌ Failed to load models. Check model filenames in repo root and browser console.');
-      throw err;
+        document.getElementById("status").innerText = "Loading face-api.js models…";
+
+        // All models are in SAME FOLDER as index.html
+        const modelPath = "./";
+
+        await faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath);
+        await faceapi.nets.faceLandmark68Net.loadFromUri(modelPath);
+        await faceapi.nets.faceRecognitionNet.loadFromUri(modelPath);
+
+        document.getElementById("status").innerText = "Models loaded ✔ Upload an image now.";
+    } 
+    catch (e) {
+        document.getElementById("status").innerText = "❌ Failed to load models";
+        console.error("MODEL LOAD ERROR:", e);
     }
-  }
+}
 
-  // Mobile-friendly image loader
-  function loadImageFromFile(file) {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = (e) => reject(e);
-      img.src = URL.createObjectURL(file);
-      // don't set crossOrigin — loading from local object URL
-    });
-  }
+loadModels();
 
-  // Prevent multiple concurrent processing
-  let busy = false;
-
-  input.addEventListener('change', async (evt) => {
-    if (busy) {
-      setStatus('Busy processing previous file — please wait...');
-      // remove selection so user can reselect later
-      input.value = '';
-      return;
-    }
-    const file = evt.target.files && evt.target.files[0];
+document.getElementById("imageUpload").addEventListener("change", async function() {
+    const file = this.files[0];
     if (!file) return;
 
-    busy = true;
-    setStatus('Loading image…');
-    previewImg.style.display = 'none';
-    facesEl.innerHTML = '';
+    document.getElementById("status").innerText = "Processing image…";
 
-    try {
-      const img = await loadImageFromFile(file);
-      // show preview (some browsers require image be in DOM to detect reliably)
-      previewImg.src = img.src;
-      previewImg.style.display = 'block';
-      setStatus('Image loaded. Decoding…');
-      // ensure decoded
-      try { await img.decode(); } catch(e) { /* ignore */ }
+    const img = document.getElementById("inputImage");
+    img.src = URL.createObjectURL(file);
+    img.style.display = "block";
 
-      setStatus('Detecting faces (this can take 5–30s for large images)…');
+    await new Promise(resolve => img.onload = resolve);
 
-      // use SSD mobilenet options (default)
-      const detections = await faceapi
-        .detectAllFaces(img, new faceapi.SsdMobilenetv1Options())
-        .withFaceLandmarks();
+    document.getElementById("status").innerText = "Detecting faces…";
 
-      setStatus(`Detection complete — found ${detections.length} faces.`);
+    const detections = await faceapi
+        .detectAllFaces(img)
+        .withFaceLandmarks()
+        .withFaceDescriptors();
 
-      if (detections.length === 0) {
-        facesEl.innerHTML = '<div>No faces detected. Try a clearer image or closer faces.</div>';
-        busy = false;
-        input.blur();
-        input.value = '';
+    const facesContainer = document.getElementById("faces");
+    facesContainer.innerHTML = "";
+
+    if (detections.length === 0) {
+        document.getElementById("status").innerText = "No faces found 😕";
         return;
-      }
-
-      setStatus('Cropping faces and rendering output…');
-
-      // crop & show each face
-      for (let i = 0; i < detections.length; i++) {
-        const box = detections[i].detection.box;
-        // create temporary canvas with the exact face size
-        const c = document.createElement('canvas');
-        c.width = Math.round(box.width);
-        c.height = Math.round(box.height);
-        const cx = c.getContext('2d');
-        // draw from previewImg (object URL) — coordinates are in original image pixel space
-        cx.drawImage(previewImg, box.x, box.y, box.width, box.height, 0, 0, c.width, c.height);
-        // create element
-        const div = document.createElement('div');
-        div.className = 'face-box';
-        const im = new Image();
-        im.src = c.toDataURL('image/png');
-        div.appendChild(im);
-        facesEl.appendChild(div);
-      }
-
-      setStatus('All faces extracted. Long-press/save images or use right-click to download the canvas images.');
-    } catch (err) {
-      console.error('Processing error:', err);
-      setStatus('❌ Error while processing image. See console for details.');
-    } finally {
-      busy = false;
-      // blur input so the OS file picker doesn't re-open on some mobiles
-      input.blur();
-      // clear value so same file can be selected again later
-      input.value = '';
     }
-  });
 
-  // start
-  try {
-    await loadModels();
-  } catch (e) {
-    // if models fail, user sees message from loadModels
-  }
-})();
+    document.getElementById("status").innerText = `Extracted ${detections.length} faces ✔`;
+
+    for (let det of detections) {
+        const box = det.detection.box;
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+
+        canvas.width = box.width;
+        canvas.height = box.height;
+
+        ctx.drawImage(
+            img,
+            box.x, box.y, box.width, box.height,
+            0, 0, box.width, box.height
+        );
+
+        const wrapper = document.createElement("div");
+        wrapper.className = "face-box";
+        wrapper.appendChild(canvas);
+
+        facesContainer.appendChild(wrapper);
+    }
+});
 </script>
 
 </body>
