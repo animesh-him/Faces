@@ -1,135 +1,97 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8" />
-<title>Face Cropper – GitHub Pages</title>
-<style>
-  body {
-    font-family: Arial, sans-serif;
-    text-align: center;
-    padding: 20px;
-  }
-  canvas {
-    margin-top: 20px;
-    border: 1px solid #ccc;
-  }
-</style>
+  <meta charset="UTF-8">
+  <title>Face Extractor</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding: 20px;
+    }
+    #faces {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .face-box {
+      border: 2px solid #333;
+      width: 160px;
+      height: 200px;
+      overflow: hidden;
+      border-radius: 6px;
+    }
+    .face-box img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  </style>
 </head>
+
 <body>
 
-<h2>Upload Group Photo → Extract All Faces</h2>
+<h2>Upload Image → Extract All Faces</h2>
 
-<input type="file" id="imageUpload" accept="image/*" />
-<p id="status">Loading models… please wait…</p>
+<input type="file" id="imageUpload">
 
-<canvas id="resultCanvas"></canvas>
-
-<!-- Load face-api.js -->
-<script src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
+<div id="faces"></div>
 
 <script>
-async function loadModels() {
-  const status = document.getElementById("status");
+  async function loadModels() {
+    await faceapi.nets.ssdMobilenetv1.loadFromUri("./");
+    await faceapi.nets.faceLandmark68Net.loadFromUri("./");
+    await faceapi.nets.faceRecognitionNet.loadFromUri("./");
+    await faceapi.nets.faceExpressionNet.loadFromUri("./");
+    await faceapi.nets.tinyFaceDetector.loadFromUri("./");
+    await faceapi.nets.ageGenderNet.loadFromUri("./");
+    await faceapi.nets.mtcnn.loadFromUri("./");
 
-  try {
-    status.innerText = "Loading models from current folder…";
-
-    // Load ALL usable models because you uploaded all files
-    await faceapi.nets.ssdMobilenetv1.loadFromUri("./");            // face detection
-    await faceapi.nets.faceLandmark68Net.loadFromUri("./");         // landmarks
-    await faceapi.nets.faceExpressionNet.loadFromUri("./");         // expressions
-    await faceapi.nets.ageGenderNet.loadFromUri("./");              // age & gender
-    await faceapi.nets.faceRecognitionNet.loadFromUri("./");        // face vectors
-
-    status.innerText = "Models loaded! Upload a group photo.";
-  } catch (e) {
-    status.innerText = "Failed to load models. Check console.";
-    console.error(e);
-  }
-}
-
-loadModels();
-
-
-document.getElementById("imageUpload").addEventListener("change", async function () {
-  const status = document.getElementById("status");
-  const file = this.files[0];
-
-  if (!file) return;
-
-  status.innerText = "Processing photo…";
-
-  // Fix for mobile: use Image() instead of createImageBitmap
-  const img = new Image();
-  img.src = URL.createObjectURL(file);
-  await img.decode();
-
-  status.innerText = "Detecting faces…";
-
-  // Detect faces + landmarks + expressions + age/gender
-  const detections = await faceapi
-    .detectAllFaces(img)
-    .withFaceLandmarks()
-    .withFaceExpressions()
-    .withAgeAndGender();
-
-  if (detections.length === 0) {
-    status.innerText = "No faces found.";
-    return;
+    console.log("✅ All models loaded successfully.");
   }
 
-  status.innerText = `Detected ${detections.length} faces. Cropping…`;
+  loadModels();
 
-  const faces = [];
-  const faceSize = 150;
+  document.getElementById("imageUpload").addEventListener("change", async function(event) {
+    const file = event.target.files[0];
+    if (!file) return;
 
-  const off = document.createElement("canvas");
-  off.width = faceSize;
-  off.height = faceSize;
-  const offCtx = off.getContext("2d");
+    const img = await faceapi.bufferToImage(file);
 
-  for (let det of detections) {
-    const box = det.detection.box;
+    // Detect all faces
+    const detections = await faceapi
+      .detectAllFaces(img, new faceapi.SsdMobilenetv1Options())
+      .withFaceLandmarks();
 
-    offCtx.clearRect(0, 0, faceSize, faceSize);
-    offCtx.drawImage(
-      img,
-      box.x,
-      box.y,
-      box.width,
-      box.height,
-      0,
-      0,
-      faceSize,
-      faceSize
-    );
+    console.log("Faces detected:", detections.length);
 
-    const cropped = new Image();
-    cropped.src = off.toDataURL();
-    await cropped.decode();
-    faces.push(cropped);
-  }
+    const facesContainer = document.getElementById("faces");
+    facesContainer.innerHTML = "";
 
-  // Arrange faces in grid
-  const cols = 5;
-  const rows = Math.ceil(faces.length / cols);
+    for (let i = 0; i < detections.length; i++) {
+      const box = detections[i].detection.box;
 
-  const resultCanvas = document.getElementById("resultCanvas");
-  resultCanvas.width = cols * faceSize;
-  resultCanvas.height = rows * faceSize;
+      // Create a canvas for each cropped face
+      const faceCanvas = faceapi.createCanvasFromMedia(img);
+      faceapi.extractFaces(img, [box]).then(faceImages => {
+        if (faceImages.length > 0) {
+          const div = document.createElement("div");
+          div.className = "face-box";
 
-  const ctx = resultCanvas.getContext("2d");
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, resultCanvas.width, resultCanvas.height);
+          const faceImg = faceImages[0];
+          faceImg.style.width = "100%";
+          faceImg.style.height = "100%";
 
-  faces.forEach((face, i) => {
-    const r = Math.floor(i / cols);
-    const c = i % cols;
-    ctx.drawImage(face, c * faceSize, r * faceSize);
+          div.appendChild(faceImg);
+          facesContainer.appendChild(div);
+        }
+      });
+    }
   });
-
-  status.innerText = "Done! Long-press/Right-click → Save Image.";
-});
 </script>
 
 </body>
