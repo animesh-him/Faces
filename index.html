@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Face Cropper – GitHub Pages</title>
+<style>
+  body {
+    font-family: Arial;
+    text-align: center;
+    padding: 20px;
+  }
+  canvas { margin-top: 20px; border: 1px solid #ddd; }
+</style>
+</head>
+<body>
+
+<h2>Upload Group Photo → Extract All Faces</h2>
+
+<input type="file" id="imageUpload" accept="image/*" />
+<p id="status"></p>
+
+<canvas id="resultCanvas"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
+<script>
+
+async function loadModels() {
+  await faceapi.nets.ssdMobilenetv1.loadFromUri("https://cdn.jsdelivr.net/npm/face-api.js/models");
+  document.getElementById("status").innerText = "Models loaded! You may upload a photo.";
+}
+
+loadModels();
+
+document.getElementById("imageUpload").addEventListener("change", async function () {
+  const status = document.getElementById("status");
+  status.innerText = "Detecting faces...";
+
+  const file = this.files[0];
+  const img = await createImageBitmap(file);
+
+  // Detect faces
+  const detections = await faceapi.detectAllFaces(img);
+  if (detections.length === 0) {
+    status.innerText = "No faces found.";
+    return;
+  }
+
+  status.innerText = `Found ${detections.length} faces. Processing...`;
+
+  const faceImages = [];
+  const faceSize = 150; // size of each rectangle
+
+  // Create offscreen canvas to crop each face
+  const off = new OffscreenCanvas(faceSize, faceSize);
+  const offCtx = off.getContext("2d");
+
+  // Crop each face
+  for (let det of detections) {
+    const { x, y, width, height } = det.box;
+
+    offCtx.clearRect(0, 0, faceSize, faceSize);
+    offCtx.drawImage(img, x, y, width, height, 0, 0, faceSize, faceSize);
+
+    const blob = await off.convertToBlob();
+    const faceImg = await createImageBitmap(blob);
+    faceImages.push(faceImg);
+  }
+
+  // Arrange all faces on one canvas
+  const cols = 5;
+  const rows = Math.ceil(faceImages.length / cols);
+
+  const resultCanvas = document.getElementById("resultCanvas");
+  resultCanvas.width = cols * faceSize;
+  resultCanvas.height = rows * faceSize;
+
+  const ctx = resultCanvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, resultCanvas.width, resultCanvas.height);
+
+  faceImages.forEach((face, i) => {
+    const row = Math.floor(i / cols);
+    const col = i % cols;
+    ctx.drawImage(face, col * faceSize, row * faceSize);
+  });
+
+  status.innerText = "Done! Right-click the canvas and Save image.";
+});
+</script>
+
+</body>
+</html>
