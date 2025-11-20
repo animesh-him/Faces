@@ -1,109 +1,162 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Face Swap UI</title>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
-  <script src="face-api.min.js"></script>
+  <meta charset="utf-8" />
+  <title>Face Extractor — GitHub Pages (root models)</title>
+
+  <!-- Use stable CDN build of face-api (no local file needed) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-    }
-    #statusBox {
-      padding: 12px;
-      background: #f3f3f3;
-      border-left: 5px solid #007bff;
-      margin-bottom: 20px;
-      font-size: 15px;
-      display: none;
-    }
-    #outputCanvas {
-      margin-top: 20px;
-      border: 1px solid #ccc;
-    }
+    body { font-family: Arial, sans-serif; padding: 18px; text-align:center; }
+    #status { display:block; margin:12px auto; padding:10px; width:90%; max-width:720px;
+              border-radius:6px; background:#f7f7f7; border-left:6px solid #2b7cff; color:#111; }
+    #previewImg { max-width:90%; display:block; margin:12px auto; }
+    #faces { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:14px; }
+    .face-box { width:150px; height:150px; overflow:hidden; border:1px solid #ccc; border-radius:6px; }
+    .face-box img{ width:100%; height:100%; object-fit:cover; display:block; }
   </style>
 </head>
-
 <body>
-  <h2>Face Swap (GitHub Pages)</h2>
 
-  <div id="statusBox"></div>
+  <h2>Upload Image → Extract All Faces</h2>
 
-  <input type="file" id="upload" accept="image/*" />
+  <input id="fileInput" type="file" accept="image/*" />
+  <div id="status">Initializing…</div>
 
-  <canvas id="outputCanvas"></canvas>
+  <!-- preview (required visible img for some mobile browsers) -->
+  <img id="previewImg" alt="preview" style="display:none" />
 
-  <script>
-    const statusBox = document.getElementById("statusBox");
+  <div id="faces"></div>
 
-    function showStatus(msg) {
-      statusBox.style.display = "block";
-      statusBox.innerText = msg;
-      console.log(msg);
+<script>
+(async () => {
+  const statusEl = document.getElementById('status');
+  const input = document.getElementById('fileInput');
+  const previewImg = document.getElementById('previewImg');
+  const facesEl = document.getElementById('faces');
+
+  function setStatus(text) {
+    statusEl.innerText = text;
+    console.log(text);
+  }
+
+  // Load models from current directory (root next to index.html)
+  async function loadModels() {
+    try {
+      setStatus('Loading models from current folder ("./") — this may take a few seconds...');
+      // load only the models you need — SSD + landmarks are required for detection + cropping
+      await faceapi.nets.ssdMobilenetv1.loadFromUri('./');
+      await faceapi.nets.faceLandmark68Net.loadFromUri('./');
+      // optional but harmless if present
+      try { await faceapi.nets.faceExpressionNet.loadFromUri('./'); } catch(e){}
+      try { await faceapi.nets.ageGenderNet.loadFromUri('./'); } catch(e){}
+      try { await faceapi.nets.faceRecognitionNet.loadFromUri('./'); } catch(e){}
+      setStatus('Models loaded. Select a photo to process.');
+    } catch (err) {
+      console.error('Model load error:', err);
+      setStatus('❌ Failed to load models. Check model filenames in repo root and browser console.');
+      throw err;
     }
+  }
 
-    async function loadModels() {
-      showStatus("Loading models...");
-
-      await faceapi.nets.ssdMobilenetv1.loadFromUri("./");
-      await faceapi.nets.faceLandmark68Net.loadFromUri("./");
-      await faceapi.nets.faceRecognitionNet.loadFromUri("./");
-
-      showStatus("Models loaded successfully.");
-    }
-
-    loadModels().catch(err => {
-      showStatus("❌ Model load error: " + err);
+  // Mobile-friendly image loader
+  function loadImageFromFile(file) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = (e) => reject(e);
+      img.src = URL.createObjectURL(file);
+      // don't set crossOrigin — loading from local object URL
     });
+  }
 
-    document.getElementById("upload").addEventListener("change", async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
+  // Prevent multiple concurrent processing
+  let busy = false;
 
-      const img = await loadImage(URL.createObjectURL(file));
-      const canvas = document.getElementById("outputCanvas");
+  input.addEventListener('change', async (evt) => {
+    if (busy) {
+      setStatus('Busy processing previous file — please wait...');
+      // remove selection so user can reselect later
+      input.value = '';
+      return;
+    }
+    const file = evt.target.files && evt.target.files[0];
+    if (!file) return;
 
-      canvas.width = img.width;
-      canvas.height = img.height;
+    busy = true;
+    setStatus('Loading image…');
+    previewImg.style.display = 'none';
+    facesEl.innerHTML = '';
 
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0);
+    try {
+      const img = await loadImageFromFile(file);
+      // show preview (some browsers require image be in DOM to detect reliably)
+      previewImg.src = img.src;
+      previewImg.style.display = 'block';
+      setStatus('Image loaded. Decoding…');
+      // ensure decoded
+      try { await img.decode(); } catch(e) { /* ignore */ }
 
-      showStatus("Detecting faces… (This may take 10–20s for large images)");
+      setStatus('Detecting faces (this can take 5–30s for large images)…');
 
-      try {
-        const detections = await faceapi.detectAllFaces(
-          img, new faceapi.SsdMobilenetv1Options()
-        ).withFaceLandmarks().withFaceDescriptors();
+      // use SSD mobilenet options (default)
+      const detections = await faceapi
+        .detectAllFaces(img, new faceapi.SsdMobilenetv1Options())
+        .withFaceLandmarks();
 
-        showStatus(`Detected ${detections.length} faces.`);
+      setStatus(`Detection complete — found ${detections.length} faces.`);
 
-        if (detections.length === 0) {
-          showStatus("⚠️ No faces found.");
-          return;
-        }
-
-        // Example: Just redraw (no swap yet)
-        showStatus("Processing output…");
-        ctx.drawImage(img, 0, 0);
-
-        showStatus("✅ Done!");
-
-      } catch (err) {
-        showStatus("❌ Processing error: " + err);
+      if (detections.length === 0) {
+        facesEl.innerHTML = '<div>No faces detected. Try a clearer image or closer faces.</div>';
+        busy = false;
+        input.blur();
+        input.value = '';
+        return;
       }
-    });
 
-    function loadImage(url) {
-      return new Promise((resolve) => {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => resolve(img);
-        img.src = url;
-      });
+      setStatus('Cropping faces and rendering output…');
+
+      // crop & show each face
+      for (let i = 0; i < detections.length; i++) {
+        const box = detections[i].detection.box;
+        // create temporary canvas with the exact face size
+        const c = document.createElement('canvas');
+        c.width = Math.round(box.width);
+        c.height = Math.round(box.height);
+        const cx = c.getContext('2d');
+        // draw from previewImg (object URL) — coordinates are in original image pixel space
+        cx.drawImage(previewImg, box.x, box.y, box.width, box.height, 0, 0, c.width, c.height);
+        // create element
+        const div = document.createElement('div');
+        div.className = 'face-box';
+        const im = new Image();
+        im.src = c.toDataURL('image/png');
+        div.appendChild(im);
+        facesEl.appendChild(div);
+      }
+
+      setStatus('All faces extracted. Long-press/save images or use right-click to download the canvas images.');
+    } catch (err) {
+      console.error('Processing error:', err);
+      setStatus('❌ Error while processing image. See console for details.');
+    } finally {
+      busy = false;
+      // blur input so the OS file picker doesn't re-open on some mobiles
+      input.blur();
+      // clear value so same file can be selected again later
+      input.value = '';
     }
-  </script>
+  });
+
+  // start
+  try {
+    await loadModels();
+  } catch (e) {
+    // if models fail, user sees message from loadModels
+  }
+})();
+</script>
+
 </body>
 </html>
