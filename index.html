@@ -1,84 +1,109 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Face Extractor</title>
-  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
+  <meta charset="UTF-8" />
+  <title>Face Swap UI</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script src="face-api.min.js"></script>
+
   <style>
-    body { font-family: Arial; text-align: center; padding: 20px; }
-    #faces { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 20px; }
-    .face-box { border: 2px solid black; width: 160px; height: 200px; overflow: hidden; }
-    .face-box img { width: 100%; height: 100%; object-fit: cover; }
-    #previewImg { max-width: 90%; margin-top: 20px; display: none; }
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    #statusBox {
+      padding: 12px;
+      background: #f3f3f3;
+      border-left: 5px solid #007bff;
+      margin-bottom: 20px;
+      font-size: 15px;
+      display: none;
+    }
+    #outputCanvas {
+      margin-top: 20px;
+      border: 1px solid #ccc;
+    }
   </style>
 </head>
 
 <body>
+  <h2>Face Swap (GitHub Pages)</h2>
 
-<h2>Upload Image → Extract All Faces</h2>
-<input type="file" id="imageUpload">
+  <div id="statusBox"></div>
 
-<img id="previewImg">
+  <input type="file" id="upload" accept="image/*" />
 
-<div id="faces"></div>
+  <canvas id="outputCanvas"></canvas>
 
-<script>
-  async function loadModels() {
-    await faceapi.nets.ssdMobilenetv1.loadFromUri("./");
-    await faceapi.nets.faceLandmark68Net.loadFromUri("./");
-    console.log("Models loaded");
-  }
+  <script>
+    const statusBox = document.getElementById("statusBox");
 
-  loadModels();
+    function showStatus(msg) {
+      statusBox.style.display = "block";
+      statusBox.innerText = msg;
+      console.log(msg);
+    }
 
-  document.getElementById("imageUpload").addEventListener("change", async function(event) {
-    const file = event.target.files[0];
-    if (!file) return;
+    async function loadModels() {
+      showStatus("Loading models...");
 
-    const img = document.getElementById("previewImg");
-    img.src = URL.createObjectURL(file);
-    img.style.display = "block";
+      await faceapi.nets.ssdMobilenetv1.loadFromUri("./");
+      await faceapi.nets.faceLandmark68Net.loadFromUri("./");
+      await faceapi.nets.faceRecognitionNet.loadFromUri("./");
 
-    img.onload = async () => {
-      console.log("Image loaded on screen");
+      showStatus("Models loaded successfully.");
+    }
 
-      const detections = await faceapi
-          .detectAllFaces(img, new faceapi.SsdMobilenetv1Options())
-          .withFaceLandmarks();
+    loadModels().catch(err => {
+      showStatus("❌ Model load error: " + err);
+    });
 
-      console.log("Detected faces:", detections.length);
+    document.getElementById("upload").addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
 
-      const facesContainer = document.getElementById("faces");
-      facesContainer.innerHTML = "";
+      const img = await loadImage(URL.createObjectURL(file));
+      const canvas = document.getElementById("outputCanvas");
 
-      if (detections.length === 0) {
-        facesContainer.innerHTML = "<p>No faces detected. Try another photo.</p>";
-        return;
+      canvas.width = img.width;
+      canvas.height = img.height;
+
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+
+      showStatus("Detecting faces… (This may take 10–20s for large images)");
+
+      try {
+        const detections = await faceapi.detectAllFaces(
+          img, new faceapi.SsdMobilenetv1Options()
+        ).withFaceLandmarks().withFaceDescriptors();
+
+        showStatus(`Detected ${detections.length} faces.`);
+
+        if (detections.length === 0) {
+          showStatus("⚠️ No faces found.");
+          return;
+        }
+
+        // Example: Just redraw (no swap yet)
+        showStatus("Processing output…");
+        ctx.drawImage(img, 0, 0);
+
+        showStatus("✅ Done!");
+
+      } catch (err) {
+        showStatus("❌ Processing error: " + err);
       }
+    });
 
-      // Crop all faces
-      detections.forEach((detection) => {
-        const { x, y, width, height } = detection.detection.box;
-
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, x, y, width, height, 0, 0, width, height);
-
-        const faceDiv = document.createElement("div");
-        faceDiv.className = "face-box";
-
-        const faceImg = new Image();
-        faceImg.src = canvas.toDataURL();
-
-        faceDiv.appendChild(faceImg);
-        facesContainer.appendChild(faceDiv);
+    function loadImage(url) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => resolve(img);
+        img.src = url;
       });
-    };
-  });
-</script>
-
+    }
+  </script>
 </body>
 </html>
