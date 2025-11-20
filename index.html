@@ -5,11 +5,14 @@
 <title>Face Cropper – GitHub Pages</title>
 <style>
   body {
-    font-family: Arial;
+    font-family: Arial, sans-serif;
     text-align: center;
     padding: 20px;
   }
-  canvas { margin-top: 20px; border: 1px solid #ddd; }
+  canvas {
+    margin-top: 20px;
+    border: 1px solid #ccc;
+  }
 </style>
 </head>
 <body>
@@ -17,74 +20,115 @@
 <h2>Upload Group Photo → Extract All Faces</h2>
 
 <input type="file" id="imageUpload" accept="image/*" />
-<p id="status"></p>
+<p id="status">Loading models… please wait…</p>
 
 <canvas id="resultCanvas"></canvas>
 
+<!-- Load face-api.js -->
 <script src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
-<script>
 
+<script>
 async function loadModels() {
-  await faceapi.nets.ssdMobilenetv1.loadFromUri("https://cdn.jsdelivr.net/npm/face-api.js/models");
-  document.getElementById("status").innerText = "Models loaded! You may upload a photo.";
+  const status = document.getElementById("status");
+
+  try {
+    status.innerText = "Loading models from current folder…";
+
+    // Load ALL usable models because you uploaded all files
+    await faceapi.nets.ssdMobilenetv1.loadFromUri("./");            // face detection
+    await faceapi.nets.faceLandmark68Net.loadFromUri("./");         // landmarks
+    await faceapi.nets.faceExpressionNet.loadFromUri("./");         // expressions
+    await faceapi.nets.ageGenderNet.loadFromUri("./");              // age & gender
+    await faceapi.nets.faceRecognitionNet.loadFromUri("./");        // face vectors
+
+    status.innerText = "Models loaded! Upload a group photo.";
+  } catch (e) {
+    status.innerText = "Failed to load models. Check console.";
+    console.error(e);
+  }
 }
 
 loadModels();
 
+
 document.getElementById("imageUpload").addEventListener("change", async function () {
   const status = document.getElementById("status");
-  status.innerText = "Detecting faces...";
-
   const file = this.files[0];
-  const img = await createImageBitmap(file);
 
-  // Detect faces
-  const detections = await faceapi.detectAllFaces(img);
+  if (!file) return;
+
+  status.innerText = "Processing photo…";
+
+  // Fix for mobile: use Image() instead of createImageBitmap
+  const img = new Image();
+  img.src = URL.createObjectURL(file);
+  await img.decode();
+
+  status.innerText = "Detecting faces…";
+
+  // Detect faces + landmarks + expressions + age/gender
+  const detections = await faceapi
+    .detectAllFaces(img)
+    .withFaceLandmarks()
+    .withFaceExpressions()
+    .withAgeAndGender();
+
   if (detections.length === 0) {
     status.innerText = "No faces found.";
     return;
   }
 
-  status.innerText = `Found ${detections.length} faces. Processing...`;
+  status.innerText = `Detected ${detections.length} faces. Cropping…`;
 
-  const faceImages = [];
-  const faceSize = 150; // size of each rectangle
+  const faces = [];
+  const faceSize = 150;
 
-  // Create offscreen canvas to crop each face
-  const off = new OffscreenCanvas(faceSize, faceSize);
+  const off = document.createElement("canvas");
+  off.width = faceSize;
+  off.height = faceSize;
   const offCtx = off.getContext("2d");
 
-  // Crop each face
   for (let det of detections) {
-    const { x, y, width, height } = det.box;
+    const box = det.detection.box;
 
     offCtx.clearRect(0, 0, faceSize, faceSize);
-    offCtx.drawImage(img, x, y, width, height, 0, 0, faceSize, faceSize);
+    offCtx.drawImage(
+      img,
+      box.x,
+      box.y,
+      box.width,
+      box.height,
+      0,
+      0,
+      faceSize,
+      faceSize
+    );
 
-    const blob = await off.convertToBlob();
-    const faceImg = await createImageBitmap(blob);
-    faceImages.push(faceImg);
+    const cropped = new Image();
+    cropped.src = off.toDataURL();
+    await cropped.decode();
+    faces.push(cropped);
   }
 
-  // Arrange all faces on one canvas
+  // Arrange faces in grid
   const cols = 5;
-  const rows = Math.ceil(faceImages.length / cols);
+  const rows = Math.ceil(faces.length / cols);
 
   const resultCanvas = document.getElementById("resultCanvas");
   resultCanvas.width = cols * faceSize;
   resultCanvas.height = rows * faceSize;
 
   const ctx = resultCanvas.getContext("2d");
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, resultCanvas.width, resultCanvas.height);
 
-  faceImages.forEach((face, i) => {
-    const row = Math.floor(i / cols);
-    const col = i % cols;
-    ctx.drawImage(face, col * faceSize, row * faceSize);
+  faces.forEach((face, i) => {
+    const r = Math.floor(i / cols);
+    const c = i % cols;
+    ctx.drawImage(face, c * faceSize, r * faceSize);
   });
 
-  status.innerText = "Done! Right-click the canvas and Save image.";
+  status.innerText = "Done! Long-press/Right-click → Save Image.";
 });
 </script>
 
